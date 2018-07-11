@@ -1,0 +1,249 @@
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // seller
+    match /seller/{sellerID} {
+      allow get: if isUserAuthenticated(sellerID) && existingData().isActive;
+      allow create: if isUserAuthenticated(sellerID)
+                    && incomingData().keys().hasAll(['name', 'shopRef', 'createdAt', 'updatedAt', 'isActive'])
+                    && validateName(incomingData().name)
+                    && incomingData().isActive
+                    && incomingData().createdAt is timestamp
+                    && incomingData().updatedAt is timestamp
+                    && getAfterData(incomingData().shopRef).sellerRef == incomingPath();
+      allow update: if isUserAuthenticated(sellerID)
+                    && validateName(incomingData().name)
+                    && incomingData().createdAt == existingData().createdAt
+                    && incomingData().updatedAt is timestamp
+                    && incomingData().isActive == existingData().isActive
+                    && incomingData().shopRef == existingData().shopRef;
+
+      function validateName(name) {
+        return validateString(name, 3, 10);
+      }
+    }
+
+    // customer
+    match /customer/{customerID} {
+      allow get: if isUserAuthenticated(customerID) && existingData().isActive;
+      allow create: if isUserAuthenticated(customerID)
+                    && incomingData().keys().hasAll(['name', 'cartRef', 'createdAt', 'updatedAt', 'isActive'])
+                    && validateName(incomingData().name)
+                    && incomingData().isActive
+                    && incomingData().createdAt is timestamp
+                    && incomingData().updatedAt is timestamp
+                    && getAfterData(incomingData().cartRef).customerRef == incomingPath();
+      allow update: if isUserAuthenticated(customerID)
+                    && validateName(incomingData().name)
+                    && incomingData().createdAt == existingData().createdAt
+                    && incomingData().updatedAt is timestamp
+                    && incomingData().isActive == existingData().isActive
+                    && incomingData().cartRef == existingData().cartRef;
+
+      function validateName(name) {
+        return validateString(name, 3, 10);
+      }
+    }
+
+    match /securecustomer/{customerID} {
+      allow get: if isCustomerAuthenticated(documentPath(['customer', customerID]));
+      allow create: if isCustomerAuthenticated(documentPath(['customer', customerID]))
+                    && incomingData().keys().hasAll(['gender', 'birthday', 'paymentServiceCustomerID', 'createdAt', 'updatedAt'])
+                    && validateGender(incomingData().gender)
+                    && incomingData().birthday is timestamp
+                    && incomingData().paymentServiceCustomerID is string
+                    && incomingData().createdAt is timestamp
+                    && incomingData().updatedAt is timestamp;
+      allow update: if isCustomerAuthenticated(documentPath(['customer', customerID]))
+                    && validateGender(incomingData().gender)
+                    && incomingData().birthday is timestamp
+                    && incomingData().paymentServiceCustomerID == existingData().paymentServiceCustomerID
+                    && incomingData().createdAt == existingData().createdAt
+                    && incomingData().updatedAt is timestamp;
+
+      function validateGender(gender) {
+        return gender == 'male' || gender == 'female' || gender == 'unknown';
+      }
+    }
+
+    // shop
+    match /shop/{shopID} {
+      allow get: if isAuthenticated() && isSellerAuthenticated(existingData().sellerRef) && existingData().isActive;
+      allow list: if isAuthenticated() && existingData().isActive;
+      allow create: if isAuthenticated()
+                    && incomingData().keys().hasAll(['name', 'sellerRef', 'createdAt', 'updatedAt', 'isActive'])
+                    && validateName(incomingData().name)
+                    && incomingData().isActive
+                    && incomingData().createdAt is timestamp
+                    && incomingData().updatedAt is timestamp
+                    && getAfterData(incomingData().sellerRef).shopRef == incomingPath();
+      allow update: if isShopOwner(authenticatedSellerRef(), incomingPath())
+                    && validateName(incomingData().name)
+                    && incomingData().createdAt == existingData().createdAt
+                    && incomingData().updatedAt is timestamp
+                    && incomingData().isActive == existingData().isActive
+                    && incomingData().sellerRef == existingData().sellerRef;
+
+      function validateName(name) {
+        return validateString(name, 5, 30);
+      }
+    }
+
+    // cart
+    match /cart/{cartID} {
+      allow get: if isAuthenticated() && isCustomerAuthenticated(existingData().customerRef);
+      allow create: if isAuthenticated()
+                    && incomingData().keys().hasAll(['customerRef', 'createdAt', 'updatedAt'])
+                    && incomingData().createdAt is timestamp
+                    && incomingData().updatedAt is timestamp
+                    && getAfterData(incomingData().customerRef).cartRef == incomingPath();
+
+      match /products/{productID} {
+        allow list: if isAuthenticated()
+                    && isCustomerAuthenticated(getData(documentPath(['cart', cartID])).customerRef);
+        allow create: if isAuthenticated()
+                      && incomingData().keys().hasAll(['quantity', 'cartRef', 'productRef', 'createdAt', 'updatedAt'])
+                      && isMatchAuthUserReference(incomingData().user)
+                      && matchCartReference(incomingData().cartRef)
+                      && validateQuantity(incomingData().quantity)
+                      && isPublishedProduct(incomingData().productRef)
+                      && incomingData().createdAt is timestamp
+                      && incomingData().updatedAt is timestamp;
+        allow update: if isAuthenticated()
+                      && isMatchAuthUserReference(incomingData().user)
+                      && matchCartReference(incomingData().cartRef)
+                      && validateQuantity(incomingData().quantity)
+                      && incomingData().createdAt == existingData().createdAt
+                      && incomingData().updatedAt is timestamp;
+        allow delete: if isAuthenticated()
+                      && isMatchAuthUserReference(existingData().user)
+                      && matchCartReference(existingData().cartRef);
+
+        function validateQuantity(quantity) {
+          return validateInt(quantity, 1, 20);
+        }
+
+        function isPublishedProduct(productRef) {
+          return getData(productRef).isActive;
+        }
+
+        function isMatchCartReference(cartRef) {
+          return cartRef == documentPath(['cart', cartID]);
+        }
+      }
+    }
+
+    // product
+    match /product/{productID} {
+      allow get: if isAuthenticated() && existingData().isActive;
+      allow list: if isAuthenticated()
+                  && (
+                    (isShopOwner(authenticatedSellerRef(), existingData().shopRef) && existingData().isActive)
+                    || (existingData().isActive && existingData().isPublished)
+                  );
+      allow create: if isAuthenticated()
+                    && incomingData().keys().hasAll(['name', 'desc', 'stock', 'price', 'postage', 'estimatedShippingDays', 'isPublished', 'isActive', 'shopRef', 'createdAt', 'updatedAt'])
+                    && isShopOwner(authenticatedSellerRef(), incomingData().shopRef)
+                    && validateFields()
+                    && incomingData().isActive
+                    && incomingData().createdAt is timestamp
+                    && incomingData().updatedAt is timestamp;
+      allow update: if isAuthenticated()
+                    && isShopOwner(authenticatedSellerRef(), incomingData().shopRef)
+                    && validateFields()
+                    && incomingData().isActive
+                    && incomingData().shopRef == existingData().shopRef
+                    && incomingData().createdAt == existingData().createdAt
+                    && incomingData().updatedAt is timestamp;
+
+      function validateFields() {
+        return validateString(incomingData().name, 1, 50)
+          && validateString(incomingData().desc, 1, 2000)
+          && validateInt(incomingData().stock, 0, 999)
+          && validateInt(incomingData().price, 500, 999999)
+          && validateInt(incomingData().postage, 0, 3000)
+          && validateInt(incomingData().estimatedShippingDays, 0, 90)
+          && incomingData().isPublished is bool;
+      }
+    }
+
+    // --------------------
+    // helper functions
+
+    function documentPath(paths) {
+      return path([['databases', database, 'documents'].join('/'), paths.join('/')].join('/'));
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isUserAuthenticated(userID) {
+      return request.auth.uid == userID;
+    }
+
+    function isSellerAuthenticated(sellerRef) {
+      return authenticatedSellerRef() == sellerRef;
+    }
+
+    function isCustomerAuthenticated(customerRef) {
+      return authenticatedCustomerRef() == customerRef;
+    }
+
+    function authenticatedSellerRef() {
+      return documentPath(['seller', request.auth.uid]);
+    }
+
+    function authenticatedCustomerRef() {
+      return documentPath(['customer', request.auth.uid]);
+    }
+
+    function existingData() {
+      return resource.data;
+    }
+
+    function existingPath() {
+      return resource.__name__;
+    }
+
+    function incomingData() {
+      return request.resource.data;
+    }
+
+    function incomingPath() {
+      return request.resource.__name__;
+    }
+
+    function getData(path) {
+      return get(path).data;
+    }
+
+    function getAfterData(path) {
+      return getAfter(path).data;
+    }
+
+    function fieldExists(data, field) {
+      return !isUndefined(data, field) && !isNull(data, field);
+    }
+
+    function isUndefined(data, field) {
+      return !data.keys().hasAll([field]);
+    }
+
+    function isNull(data, field) {
+      return data[field] == null;
+    }
+
+    function validateString(text, min, max) {
+      return text is string && min <= text.size() && text.size() <= max;
+    }
+
+    function validateInt(num, min, max) {
+      return num is int && min <= num && num <= max;
+    }
+
+    function isShopOwner(sellerRef, shopRef) {
+      return getData(sellerRef).shopRef == shopRef;
+    }
+  }
+}
